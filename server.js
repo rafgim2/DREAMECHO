@@ -10,29 +10,54 @@ const wss = new WebSocket.Server({ server });
 const clients = new Set();
 
 wss.on('connection', ws => {
-  // Añadimos el nuevo cliente
   clients.add(ws);
-  // Enviamos sólo a este cliente el número total de conexiones
-  ws.send(JSON.stringify({
-    type: 'stats',
-    clients: clients.size
-  }));
 
-  ws.on('message', message => {
-    // Reenviamos cada mensaje MIDI a todos los demás clientes
-    for (let client of clients) {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(message);
+  // Opcional: notificar a todos los clientes que ha cambiado el número
+  broadcastStats();
+
+  ws.on('message', rawMessage => {
+    let message;
+    try {
+      message = JSON.parse(rawMessage);
+    } catch (e) {
+      console.error("Mensaje no válido:", rawMessage);
+      return;
+    }
+
+    if (message.type === "ping") {
+      // Responder sólo al cliente que preguntó
+      ws.send(JSON.stringify({
+        type: "stats",
+        clients: clients.size
+      }));
+    } else if (message.type === "midi") {
+      // Reenviar el mensaje MIDI a todos menos al emisor
+      for (let client of clients) {
+        if (client !== ws && client.readyState === WebSocket.OPEN) {
+          client.send(rawMessage);
+        }
       }
     }
   });
 
   ws.on('close', () => {
     clients.delete(ws);
+    // Opcional: notificar a todos los demás
+    broadcastStats();
   });
 });
 
-// Servimos en el puerto 3000 o el que indique RENDER
+// Enviar a todos los clientes el número total de conexiones
+function broadcastStats() {
+  const total = clients.size;
+  const message = JSON.stringify({ type: "stats", clients: total });
+  for (let client of clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor WebSocket activo en el puerto ${PORT}`);
