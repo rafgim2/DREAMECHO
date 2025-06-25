@@ -8,13 +8,13 @@ const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 
 // Mantiene todos los clientes conectados
-const clients = new Set();
+targets = new Set();
 
 // Función para enviar a todos los clientes el número de conexiones
 function broadcastStats() {
-  const total = clients.size;
+  const total = targets.size;
   const msg   = JSON.stringify({ type: 'stats', clients: total });
-  for (let client of clients) {
+  for (let client of targets) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(msg);
     }
@@ -23,7 +23,11 @@ function broadcastStats() {
 
 wss.on('connection', ws => {
   // Añadimos el nuevo cliente
-  clients.add(ws);
+targets.add(ws);
+
+  // —— Envío inmediato de sincronización inicial solo al nuevo cliente ——
+  ws.send(JSON.stringify({ type: 'sync' }));
+  // ————————————————————————————————————————————————
 
   // Notificar a todos del nuevo total
   broadcastStats();
@@ -42,13 +46,13 @@ wss.on('connection', ws => {
         // Responder sólo a este cliente
         ws.send(JSON.stringify({
           type: 'stats',
-          clients: clients.size
+          clients: targets.size
         }));
         break;
 
       case 'midi':
         // Reenviar mensaje MIDI a todos excepto al emisor
-        for (let client of clients) {
+        for (let client of targets) {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
             client.send(raw);
           }
@@ -63,7 +67,7 @@ wss.on('connection', ws => {
           text: message.text,
           time: Date.now()
         });
-        for (let client of clients) {
+        for (let client of targets) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(chatMsg);
           }
@@ -77,11 +81,22 @@ wss.on('connection', ws => {
   });
 
   ws.on('close', () => {
-    clients.delete(ws);
+    targets.delete(ws);
     // Notificar a todos del nuevo total tras desconexión
     broadcastStats();
   });
 });
+
+// —— Envío periódico de sincronización a todos cada 20 minutos ——
+setInterval(() => {
+  const syncMsg = JSON.stringify({ type: 'sync' });
+  for (let client of targets) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(syncMsg);
+    }
+  }
+}, 20 * 60 * 1000);
+// ————————————————————————————————————————————————
 
 // Opcional: servir archivos estáticos (HTML, JS, CSS) en /public
 // app.use(express.static('public'));
