@@ -30,13 +30,16 @@ wss.on('connection', ws => {
     try {
       message = JSON.parse(raw);
     } catch (e) {
-      console.error(raw);
+      console.error('JSON inválido:', raw);
       return;
     }
     const { type } = message;
+
     if (type === 'ping') {
       ws.send(JSON.stringify({ type: 'stats', clients: clients.size }));
-    } else if (type === 'chat' || type === 'midi' || type === 'signal') {
+    }
+    // ahora incluimos 'ready' en los mensajes que se retransmiten
+    else if (type === 'chat' || type === 'midi' || type === 'signal' || type === 'ready') {
       for (const client of clients) {
         if (client !== ws && client.readyState === WebSocket.OPEN) {
           client.send(raw);
@@ -54,11 +57,4 @@ wss.on('connection', ws => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
-});
-
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Servidor HTTP + WS escuchando en puerto ${PORT}`);
-  console.log(`→ Abre http://localhost:${PORT}/oyente.html en tu navegador`);
 });
