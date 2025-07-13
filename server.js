@@ -1,95 +1,85 @@
-// server.js
-// server.js
-const express = require('express');
-const http = require('http');
+const express   = require('express');
+const http      = require('http');
 const WebSocket = require('ws');
 
-const app = express();
+const app    = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss    = new WebSocket.Server({ server });
 
-// Almacena todos los clientes conectados
+// Mantiene todos los clientes conectados
 const clients = new Set();
 
-// Función genérica para enviar un mensaje a todos (opcionalmente excluyendo uno)
-function broadcast(message, exclude) {
+// Envía a todos el número de conexiones
+function broadcastStats() {
+  const total = clients.size;
+  const msg   = JSON.stringify({ type: 'stats', clients: total });
   for (const client of clients) {
-    if (client !== exclude && client.readyState === WebSocket.OPEN) {
-      client.send(message);
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
     }
   }
 }
 
-// Envía estadísticas de número de clientes a todos
-function broadcastStats() {
-  const statsMsg = JSON.stringify({ type: 'stats', clients: clients.size });
-  broadcast(statsMsg, null);
-}
-
-wss.on('connection', (ws) => {
-  // Nuevo cliente
+wss.on('connection', ws => {
+  // Añadimos el nuevo cliente
   clients.add(ws);
   broadcastStats();
 
-  ws.on('message', (data) => {
-    let msg;
+  ws.on('message', raw => {
+    let message;
     try {
-      msg = JSON.parse(data);
+      message = JSON.parse(raw);
     } catch (e) {
-      console.error('JSON inválido:', data);
+      console.error('Mensaje no válido:', raw);
       return;
     }
 
-    switch (msg.type) {
+    switch (message.type) {
       case 'ping':
-        // Responde al ping con estadísticas
-        ws.send(JSON.stringify({ type: 'stats', clients: clients.size }));
-        break;
-
-      case 'stats':
-        // También permitimos solicitar stats explícitamente
+        // Responder estadísticas solo a este cliente
         ws.send(JSON.stringify({ type: 'stats', clients: clients.size }));
         break;
 
       case 'chat':
-        // Reenvía chat a todos
-        broadcast(JSON.stringify({
+        // Reenviar chat a todos
+        const chatMsg = JSON.stringify({
           type: 'chat',
-          user: msg.user,
-          text: msg.text,
+          user: message.user,
+          text: message.text,
           time: Date.now()
-        }), null);
-        break;
-
-      case 'midi':
-        // Reenvía datos MIDI a todos excepto emisor
-        broadcast(data, ws);
+        });
+        for (const client of clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(chatMsg);
+          }
+        }
         break;
 
       case 'signal':
-        // Reenvía señalización WebRTC a todos excepto emisor
-        broadcast(data, ws);
+        // Reenviar ofertas/respuestas/candidatos ICE a todos excepto al emisor
+        for (const client of clients) {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(raw);
+          }
+        }
         break;
 
       default:
-        console.warn('Tipo de mensaje desconocido:', msg.type);
+        // Ignorar otros tipos (antes: 'midi', etc.)
+        break;
     }
   });
 
   ws.on('close', () => {
-    // Cliente desconectado
     clients.delete(ws);
     broadcastStats();
   });
-
-  ws.on('error', (err) => {
-    console.error('Error WebSocket:', err);
-  });
 });
 
-// Puerto de escucha
+// Servir archivos estáticos desde /public si los pones ahí
+app.use(express.static('public'));
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor WebSocket activo en el puerto ${PORT}`);
 });
-
