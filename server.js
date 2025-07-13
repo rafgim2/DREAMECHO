@@ -1,4 +1,3 @@
-// server.js
 const express   = require('express');
 const http      = require('http');
 const WebSocket = require('ws');
@@ -10,11 +9,11 @@ const wss    = new WebSocket.Server({ server });
 // Mantiene todos los clientes conectados
 const clients = new Set();
 
-// Función para enviar a todos los clientes el número de conexiones
+// Envía a todos el número de conexiones
 function broadcastStats() {
   const total = clients.size;
   const msg   = JSON.stringify({ type: 'stats', clients: total });
-  for (let client of clients) {
+  for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(msg);
     }
@@ -24,7 +23,6 @@ function broadcastStats() {
 wss.on('connection', ws => {
   // Añadimos el nuevo cliente
   clients.add(ws);
-  // Notificar a todos del nuevo total
   broadcastStats();
 
   ws.on('message', raw => {
@@ -37,27 +35,9 @@ wss.on('connection', ws => {
     }
 
     switch (message.type) {
-
       case 'ping':
-        // Responder sólo a este cliente
-        ws.send(JSON.stringify({
-          type: 'stats',
-          clients: clients.size
-        }));
-        break;
-
-      case 'stats':
-        // (opcional) cliente solicitó stats explícitamente
-        broadcastStats();
-        break;
-
-      case 'midi':
-        // Reenviar mensaje MIDI a todos excepto al emisor
-        for (let client of clients) {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(raw);
-          }
-        }
+        // Responder estadísticas solo a este cliente
+        ws.send(JSON.stringify({ type: 'stats', clients: clients.size }));
         break;
 
       case 'chat':
@@ -65,36 +45,19 @@ wss.on('connection', ws => {
         const chatMsg = JSON.stringify({
           type: 'chat',
           user: message.user,
-          text: message.text
+          text: message.text,
+          time: Date.now()
         });
-        for (let client of clients) {
+        for (const client of clients) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(chatMsg);
           }
         }
         break;
 
-      case 'talk':
-        // Push-to-talk: indica que uno está hablando; reenviar a todos excepto emisor
-        for (let client of clients) {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(raw);
-          }
-        }
-        break;
-
-      case 'midiActive':
-        // Indica que hay un evento MIDI activo; reenviar a todos excepto emisor
-        for (let client of clients) {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(raw);
-          }
-        }
-        break;
-
       case 'signal':
-        // Señalización WebRTC: offer/answer/candidate
-        for (let client of clients) {
+        // Reenviar ofertas/respuestas/candidatos ICE a todos excepto al emisor
+        for (const client of clients) {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
             client.send(raw);
           }
@@ -109,13 +72,12 @@ wss.on('connection', ws => {
 
   ws.on('close', () => {
     clients.delete(ws);
-    // Notificar a todos del nuevo total tras desconexión
     broadcastStats();
   });
 });
 
-// Servir estáticos si lo necesitas
-// app.use(express.static('public'));
+// Servir archivos estáticos desde /public si los colocas ahí
+app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
