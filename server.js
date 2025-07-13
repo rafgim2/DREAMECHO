@@ -1,4 +1,3 @@
-// server.js
 const express   = require('express');
 const http      = require('http');
 const WebSocket = require('ws');
@@ -66,7 +65,7 @@ wss.on('connection', ws => {
         break;
 
       default:
-        // Ignorar otros tipos (antes: 'midi', etc.)
+        // Ignorar otros tipos
         break;
     }
   });
@@ -77,7 +76,7 @@ wss.on('connection', ws => {
   });
 });
 
-// Servir archivos estáticos desde /public si los pones ahí
+// Servir archivos estáticos desde /public si los colocas ahí
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
