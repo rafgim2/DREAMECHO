@@ -7,6 +7,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const rooms = {};
+const roomOffers = {};
 
 function roomStats(pin) {
   const clients = rooms[pin] || new Set();
@@ -22,17 +23,26 @@ wss.on('connection', ws => {
       return;
     }
     const pin = message.pin;
+
+    // Si es la primera vez que este ws usa este pin, lo añadimos a la sala
     if (pin && !ws.pin) {
       ws.pin = pin;
       if (!rooms[pin]) rooms[pin] = new Set();
       rooms[pin].add(ws);
+
+      // Si ya hay un offer almacenado, se lo enviamos al nuevo cliente
+      if (roomOffers[pin] && rooms[pin].size > 1) {
+        ws.send(roomOffers[pin]);
+      }
     }
+
     switch (message.type) {
       case 'ping':
         if (ws.pin) {
           ws.send(JSON.stringify(roomStats(ws.pin)));
         }
         break;
+
       case 'chat':
         if (ws.pin) {
           const chatMsg = JSON.stringify({
@@ -48,8 +58,14 @@ wss.on('connection', ws => {
           }
         }
         break;
+
       case 'signal':
         if (ws.pin) {
+          // Si es una oferta del profesor, la guardamos
+          if (message.offer) {
+            roomOffers[ws.pin] = raw;
+          }
+          // La reenviamos a todos en la sala excepto al emisor
           for (const client of rooms[ws.pin]) {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(raw);
@@ -65,7 +81,9 @@ wss.on('connection', ws => {
       rooms[ws.pin].delete(ws);
       if (rooms[ws.pin].size === 0) {
         delete rooms[ws.pin];
+        delete roomOffers[ws.pin];
       } else {
+        // Notificar estadísticas a los que quedan
         const stats = JSON.stringify(roomStats(ws.pin));
         for (const client of rooms[ws.pin]) {
           if (client.readyState === WebSocket.OPEN) {
