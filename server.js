@@ -1,85 +1,88 @@
-const express   = require('express');
-const http      = require('http');
-const WebSocket = require('ws');
+const express   = require('express')
+const http      = require('http')
+const WebSocket = require('ws')
 
-const app    = express();
-const server = http.createServer(app);
-const wss    = new WebSocket.Server({ server });
+const app    = express()
+const server = http.createServer(app)
+const wss    = new WebSocket.Server({ server })
 
-// Mantiene todos los clientes conectados
-const clients = new Set();
+const rooms = new Map()
 
-// Envía a todos el número de conexiones
-function broadcastStats() {
-  const total = clients.size;
-  const msg   = JSON.stringify({ type: 'stats', clients: total });
+function broadcastStats(room) {
+  const clients = rooms.get(room) || new Set()
+  const total = clients.size
+  const msg   = JSON.stringify({ type: 'stats', clients: total })
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
+      client.send(msg)
     }
   }
 }
 
 wss.on('connection', ws => {
-  // Añadimos el nuevo cliente
-  clients.add(ws);
-  broadcastStats();
-
   ws.on('message', raw => {
-    let message;
+    let message
     try {
-      message = JSON.parse(raw);
-    } catch (e) {
-      console.error('Mensaje no válido:', raw);
-      return;
+      message = JSON.parse(raw)
+    } catch {
+      return
     }
-
     switch (message.type) {
-      case 'ping':
-        // Responder estadísticas solo a este cliente
-        ws.send(JSON.stringify({ type: 'stats', clients: clients.size }));
-        break;
+      case 'join':
+        ws.role = message.role
+        ws.room = message.pin
+        if (!rooms.has(ws.room)) {
+          rooms.set(ws.room, new Set())
+        }
+        rooms.get(ws.room).add(ws)
+        broadcastStats(ws.room)
+        break
 
       case 'chat':
-        // Reenviar chat a todos
-        const chatMsg = JSON.stringify({
-          type: 'chat',
-          user: message.user,
-          text: message.text,
-          time: Date.now()
-        });
-        for (const client of clients) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(chatMsg);
+        {
+          const clients = rooms.get(ws.room) || new Set()
+          const chatMsg = JSON.stringify({
+            type: 'chat',
+            user: message.user,
+            text: message.text,
+            time: Date.now()
+          })
+          for (const client of clients) {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(chatMsg)
+            }
           }
         }
-        break;
+        break
 
       case 'signal':
-        // Reenviar ofertas/respuestas/candidatos ICE a todos excepto al emisor
-        for (const client of clients) {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(raw);
+        {
+          const clients = rooms.get(ws.room) || new Set()
+          for (const client of clients) {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(raw)
+            }
           }
         }
-        break;
-
-      default:
-        // Ignorar otros tipos
-        break;
+        break
     }
-  });
+  })
 
   ws.on('close', () => {
-    clients.delete(ws);
-    broadcastStats();
-  });
-});
+    if (ws.room && rooms.has(ws.room)) {
+      rooms.get(ws.room).delete(ws)
+      if (rooms.get(ws.room).size === 0) {
+        rooms.delete(ws.room)
+      } else {
+        broadcastStats(ws.room)
+      }
+    }
+  })
+})
 
-// Servir archivos estáticos desde /public si los colocas ahí
-app.use(express.static('public'));
+app.use(express.static('public'))
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
-  console.log(`Servidor WebSocket activo en el puerto ${PORT}`);
-});
+  console.log(`Servidor WebSocket activo en el puerto ${PORT}`)
+})
