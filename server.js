@@ -25,10 +25,10 @@ wss.on('connection', ws => {
     try {
       msg = JSON.parse(raw);
     } catch {
-      return;
+      return; // mensaje no JSON
     }
     const pin = msg.pin;
-    
+
     // Al unirse a la sala por primera vez
     if (pin && !ws.pin) {
       ws.pin = pin;
@@ -36,7 +36,6 @@ wss.on('connection', ws => {
         rooms[pin] = new Set();
       }
       rooms[pin].add(ws);
-      // Enviar stats a todos en la sala
       broadcastStats(pin);
     }
 
@@ -64,11 +63,21 @@ wss.on('connection', ws => {
 
       case 'signal':
         if (ws.pin) {
-          // reenviar a todos menos al emisor
           const enriched = JSON.stringify({ ...msg, pin: ws.pin });
           for (const c of rooms[ws.pin]) {
             if (c !== ws && c.readyState === WebSocket.OPEN) {
               c.send(enriched);
+            }
+          }
+        }
+        break;
+
+      case 'simon':  // SIMON: manejar partida Simon
+        if (ws.pin && rooms[ws.pin]) {
+          // reenviar el mensaje tal cual a todos en la sala
+          for (const c of rooms[ws.pin]) {
+            if (c.readyState === WebSocket.OPEN) {
+              c.send(JSON.stringify(msg));
             }
           }
         }
