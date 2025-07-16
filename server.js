@@ -96,5 +96,5 @@ app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(Servidor WebSocket activo en el puerto ${PORT});
+  console.log(`Servidor WebSocket activo en el puerto ${PORT}`);
 });
