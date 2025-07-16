@@ -1,88 +1,85 @@
-const express   = require('express')
-const http      = require('http')
-const WebSocket = require('ws')
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 
-const app    = express()
-const server = http.createServer(app)
-const wss    = new WebSocket.Server({ server })
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-const rooms = new Map()
+const rooms = {};
 
-function broadcastStats(room) {
-  const clients = rooms.get(room) || new Set()
-  const total = clients.size
-  const msg   = JSON.stringify({ type: 'stats', clients: total })
-  for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg)
-    }
-  }
+function roomStats(pin) {
+  const clients = rooms[pin] || new Set();
+  return { type: 'stats', clients: clients.size };
 }
 
 wss.on('connection', ws => {
   ws.on('message', raw => {
-    let message
+    let message;
     try {
-      message = JSON.parse(raw)
+      message = JSON.parse(raw);
     } catch {
-      return
+      return;
+    }
+    const pin = message.pin;
+    if (pin && !ws.pin) {
+      ws.pin = pin;
+      if (!rooms[pin]) rooms[pin] = new Set();
+      rooms[pin].add(ws);
     }
     switch (message.type) {
-      case 'join':
-        ws.role = message.role
-        ws.room = message.pin
-        if (!rooms.has(ws.room)) {
-          rooms.set(ws.room, new Set())
+      case 'ping':
+        if (ws.pin) {
+          ws.send(JSON.stringify(roomStats(ws.pin)));
         }
-        rooms.get(ws.room).add(ws)
-        broadcastStats(ws.room)
-        break
-
+        break;
       case 'chat':
-        {
-          const clients = rooms.get(ws.room) || new Set()
+        if (ws.pin) {
           const chatMsg = JSON.stringify({
             type: 'chat',
             user: message.user,
             text: message.text,
             time: Date.now()
-          })
-          for (const client of clients) {
+          });
+          for (const client of rooms[ws.pin]) {
             if (client.readyState === WebSocket.OPEN) {
-              client.send(chatMsg)
+              client.send(chatMsg);
             }
           }
         }
-        break
-
+        break;
       case 'signal':
-        {
-          const clients = rooms.get(ws.room) || new Set()
-          for (const client of clients) {
+        if (ws.pin) {
+          for (const client of rooms[ws.pin]) {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(raw)
+              client.send(raw);
             }
           }
         }
-        break
+        break;
     }
-  })
+  });
 
   ws.on('close', () => {
-    if (ws.room && rooms.has(ws.room)) {
-      rooms.get(ws.room).delete(ws)
-      if (rooms.get(ws.room).size === 0) {
-        rooms.delete(ws.room)
+    if (ws.pin && rooms[ws.pin]) {
+      rooms[ws.pin].delete(ws);
+      if (rooms[ws.pin].size === 0) {
+        delete rooms[ws.pin];
       } else {
-        broadcastStats(ws.room)
+        const stats = JSON.stringify(roomStats(ws.pin));
+        for (const client of rooms[ws.pin]) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(stats);
+          }
+        }
       }
     }
-  })
-})
+  });
+});
 
-app.use(express.static('public'))
+app.use(express.static('public'));
 
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Servidor WebSocket activo en el puerto ${PORT}`)
-})
+  console.log(`Servidor WebSocket activo en el puerto ${PORT}`);
+});
