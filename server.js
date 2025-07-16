@@ -6,8 +6,8 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const rooms = {};
-const roomOffers = {};
+const rooms = {};           // { pin: Set<ws> }
+const roomSignals = {};     // { pin: Array<rawMessage> }
 
 function roomStats(pin) {
   const clients = rooms[pin] || new Set();
@@ -24,15 +24,26 @@ wss.on('connection', ws => {
     }
     const pin = message.pin;
 
-    // Si es la primera vez que este ws usa este pin, lo añadimos a la sala
+    // On first message with pin, assign ws to room and replay stored signals
     if (pin && !ws.pin) {
       ws.pin = pin;
-      if (!rooms[pin]) rooms[pin] = new Set();
+      if (!rooms[pin]) {
+        rooms[pin] = new Set();
+        roomSignals[pin] = [];
+      }
       rooms[pin].add(ws);
-
-      // Si ya hay un offer almacenado, se lo enviamos al nuevo cliente
-      if (roomOffers[pin] && rooms[pin].size > 1) {
-        ws.send(roomOffers[pin]);
+      // replay all previous signal messages for this room
+      for (const sig of roomSignals[pin]) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(sig);
+        }
+      }
+      // broadcast updated stats
+      const statsMsg = JSON.stringify(roomStats(pin));
+      for (const client of rooms[pin]) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(statsMsg);
+        }
       }
     }
 
@@ -61,17 +72,19 @@ wss.on('connection', ws => {
 
       case 'signal':
         if (ws.pin) {
-          // Si es una oferta del profesor, la guardamos
-          if (message.offer) {
-            roomOffers[ws.pin] = raw;
-          }
-          // La reenviamos a todos en la sala excepto al emisor
+          // store this signaling message
+          roomSignals[ws.pin].push(raw);
+          // forward to all others in room
           for (const client of rooms[ws.pin]) {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(raw);
             }
           }
         }
+        break;
+
+      default:
+        // ignore
         break;
     }
   });
@@ -81,13 +94,13 @@ wss.on('connection', ws => {
       rooms[ws.pin].delete(ws);
       if (rooms[ws.pin].size === 0) {
         delete rooms[ws.pin];
-        delete roomOffers[ws.pin];
+        delete roomSignals[ws.pin];
       } else {
-        // Notificar estadísticas a los que quedan
-        const stats = JSON.stringify(roomStats(ws.pin));
+        // broadcast updated stats
+        const statsMsg = JSON.stringify(roomStats(ws.pin));
         for (const client of rooms[ws.pin]) {
           if (client.readyState === WebSocket.OPEN) {
-            client.send(stats);
+            client.send(statsMsg);
           }
         }
       }
