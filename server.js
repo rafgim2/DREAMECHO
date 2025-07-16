@@ -6,61 +6,51 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Cada sala: conjunto de sockets y array de señales (offer/answer/candidates)
-const rooms = {};        // { pin: Set<ws> }
-const roomSignals = {};  // { pin: Array<string> }
+// rooms: { pin: Set<ws> }
+const rooms = {};
 
-function roomStats(pin) {
-  const clients = rooms[pin] || new Set();
-  return { type: 'stats', clients: clients.size };
+function broadcastStats(pin) {
+  const clients = rooms[pin] ? rooms[pin].size : 0;
+  const statsMsg = JSON.stringify({ type: 'stats', clients });
+  for (const c of rooms[pin] || []) {
+    if (c.readyState === WebSocket.OPEN) {
+      c.send(statsMsg);
+    }
+  }
 }
 
 wss.on('connection', ws => {
   ws.on('message', raw => {
-    let message;
+    let msg;
     try {
-      message = JSON.parse(raw);
+      msg = JSON.parse(raw);
     } catch {
       return;
     }
-    const pin = message.pin;
-
-    // Si llega un mensaje con pin y este socket aún no está asignado, lo añadimos
+    const pin = msg.pin;
+    
+    // Al unirse a la sala por primera vez
     if (pin && !ws.pin) {
       ws.pin = pin;
       if (!rooms[pin]) {
         rooms[pin] = new Set();
-        roomSignals[pin] = [];
       }
       rooms[pin].add(ws);
-      // Reenviamos todas las señales almacenadas a este nuevo cliente
-      for (const sig of roomSignals[pin]) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(sig);
-        }
-      }
-      // Y actualizamos estadísticas
-      const statsMsg = JSON.stringify(roomStats(pin));
-      for (const c of rooms[pin]) {
-        if (c.readyState === WebSocket.OPEN) {
-          c.send(statsMsg);
-        }
-      }
+      // Enviar stats a todos en la sala
+      broadcastStats(pin);
     }
 
-    switch (message.type) {
+    switch (msg.type) {
       case 'ping':
-        if (ws.pin) {
-          ws.send(JSON.stringify(roomStats(ws.pin)));
-        }
+        if (ws.pin) broadcastStats(ws.pin);
         break;
 
       case 'chat':
         if (ws.pin) {
           const chatMsg = JSON.stringify({
             type: 'chat',
-            user: message.user,
-            text: message.text,
+            user: msg.user,
+            text: msg.text,
             time: Date.now(),
             pin: ws.pin
           });
@@ -74,11 +64,8 @@ wss.on('connection', ws => {
 
       case 'signal':
         if (ws.pin) {
-          // Creamos la señal enriquecida con el pin
-          const enriched = JSON.stringify({ ...message, pin: ws.pin });
-          // La almacenamos
-          roomSignals[ws.pin].push(enriched);
-          // Y la reenviamos a todos excepto al emisor
+          // reenviar a todos menos al emisor
+          const enriched = JSON.stringify({ ...msg, pin: ws.pin });
           for (const c of rooms[ws.pin]) {
             if (c !== ws && c.readyState === WebSocket.OPEN) {
               c.send(enriched);
@@ -88,6 +75,7 @@ wss.on('connection', ws => {
         break;
 
       default:
+        // otros tipos ignorados
         break;
     }
   });
@@ -97,14 +85,8 @@ wss.on('connection', ws => {
       rooms[ws.pin].delete(ws);
       if (rooms[ws.pin].size === 0) {
         delete rooms[ws.pin];
-        delete roomSignals[ws.pin];
       } else {
-        const statsMsg = JSON.stringify(roomStats(ws.pin));
-        for (const c of rooms[ws.pin]) {
-          if (c.readyState === WebSocket.OPEN) {
-            c.send(statsMsg);
-          }
-        }
+        broadcastStats(ws.pin);
       }
     }
   });
