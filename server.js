@@ -6,8 +6,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const rooms = {};           // { pin: Set<ws> }
-const roomSignals = {};     // { pin: Array<rawMessage> }
+// Cada sala: conjunto de sockets y array de señales (offer/answer/candidates)
+const rooms = {};        // { pin: Set<ws> }
+const roomSignals = {};  // { pin: Array<string> }
 
 function roomStats(pin) {
   const clients = rooms[pin] || new Set();
@@ -24,7 +25,7 @@ wss.on('connection', ws => {
     }
     const pin = message.pin;
 
-    // On first message with pin, assign ws to room and replay stored signals
+    // Si llega un mensaje con pin y este socket aún no está asignado, lo añadimos
     if (pin && !ws.pin) {
       ws.pin = pin;
       if (!rooms[pin]) {
@@ -32,17 +33,17 @@ wss.on('connection', ws => {
         roomSignals[pin] = [];
       }
       rooms[pin].add(ws);
-      // replay all previous signal messages for this room
+      // Reenviamos todas las señales almacenadas a este nuevo cliente
       for (const sig of roomSignals[pin]) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(sig);
         }
       }
-      // broadcast updated stats
+      // Y actualizamos estadísticas
       const statsMsg = JSON.stringify(roomStats(pin));
-      for (const client of rooms[pin]) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(statsMsg);
+      for (const c of rooms[pin]) {
+        if (c.readyState === WebSocket.OPEN) {
+          c.send(statsMsg);
         }
       }
     }
@@ -60,11 +61,12 @@ wss.on('connection', ws => {
             type: 'chat',
             user: message.user,
             text: message.text,
-            time: Date.now()
+            time: Date.now(),
+            pin: ws.pin
           });
-          for (const client of rooms[ws.pin]) {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(chatMsg);
+          for (const c of rooms[ws.pin]) {
+            if (c.readyState === WebSocket.OPEN) {
+              c.send(chatMsg);
             }
           }
         }
@@ -72,19 +74,20 @@ wss.on('connection', ws => {
 
       case 'signal':
         if (ws.pin) {
-          // store this signaling message
-          roomSignals[ws.pin].push(raw);
-          // forward to all others in room
-          for (const client of rooms[ws.pin]) {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(raw);
+          // Creamos la señal enriquecida con el pin
+          const enriched = JSON.stringify({ ...message, pin: ws.pin });
+          // La almacenamos
+          roomSignals[ws.pin].push(enriched);
+          // Y la reenviamos a todos excepto al emisor
+          for (const c of rooms[ws.pin]) {
+            if (c !== ws && c.readyState === WebSocket.OPEN) {
+              c.send(enriched);
             }
           }
         }
         break;
 
       default:
-        // ignore
         break;
     }
   });
@@ -96,11 +99,10 @@ wss.on('connection', ws => {
         delete rooms[ws.pin];
         delete roomSignals[ws.pin];
       } else {
-        // broadcast updated stats
         const statsMsg = JSON.stringify(roomStats(ws.pin));
-        for (const client of rooms[ws.pin]) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(statsMsg);
+        for (const c of rooms[ws.pin]) {
+          if (c.readyState === WebSocket.OPEN) {
+            c.send(statsMsg);
           }
         }
       }
